@@ -13,10 +13,7 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    KeyboardButton,
     Message,
-    ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
 )
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
@@ -83,9 +80,7 @@ router = Router()
 
 
 class Reg(StatesGroup):
-    waiting_fio = State()
-    waiting_phone = State()
-    waiting_receipt = State()
+    waiting_all = State()
 
 
 def join_keyboard():
@@ -101,14 +96,6 @@ def paid_keyboard():
         inline_keyboard=[
             [InlineKeyboardButton(text="✅ TO'LOV QILDIM", callback_data="paid_confirm")]
         ]
-    )
-
-
-def phone_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📱 TELEFON RAQAMIMNI YUBORISH", request_contact=True)]],
-        resize_keyboard=True,
-        one_time_keyboard=True,
     )
 
 
@@ -147,55 +134,49 @@ async def show_payment(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# ---- БЛОК 2: ДАННЫЕ + ЧЕК ----
+# ---- БЛОК 2: ВСЁ ОДНИМ СООБЩЕНИЕМ ----
 @router.callback_query(F.data == "paid_confirm")
 async def ask_data(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer(
-        "To'lovni tekshirish uchun ma'lumotlaringizni yuboring:\n\n👤 Ism va familiya"
+    text = (
+        "To'lov chekini rasm sifatida yuboring.\n\n"
+        "Rasmning tavsifiga (caption) shu tartibda yozing:\n\n"
+        "Ism Familiya\n"
+        "Telefon raqam\n\n"
+        "Masalan:\n"
+        "Anora Karimova\n"
+        "+998 90 123 45 67"
     )
-    await state.set_state(Reg.waiting_fio)
+    await callback.message.answer(text)
+    await state.set_state(Reg.waiting_all)
     await callback.answer()
 
 
-@router.message(Reg.waiting_fio)
-async def get_fio(message: Message, state: FSMContext):
-    await state.update_data(fio=message.text)
-    await message.answer(
-        "📱 Telefon raqam",
-        reply_markup=phone_keyboard(),
-    )
-    await state.set_state(Reg.waiting_phone)
-
-
-@router.message(Reg.waiting_phone, F.contact)
-async def get_phone_contact(message: Message, state: FSMContext):
-    await state.update_data(phone=message.contact.phone_number)
-    await ask_receipt(message, state)
-
-
-@router.message(Reg.waiting_phone, F.text)
-async def get_phone_text(message: Message, state: FSMContext):
-    await state.update_data(phone=message.text)
-    await ask_receipt(message, state)
-
-
-async def ask_receipt(message: Message, state: FSMContext):
-    await message.answer(
-        "📎 To'lov chekini yuboring (rasm yoki fayl):",
-        reply_markup=ReplyKeyboardRemove(),
-    )
-    await state.set_state(Reg.waiting_receipt)
+def parse_caption(caption: str | None):
+    if not caption:
+        return None, None
+    lines = [line.strip() for line in caption.strip().split("\n") if line.strip()]
+    fio = lines[0] if len(lines) >= 1 else None
+    phone = lines[1] if len(lines) >= 2 else None
+    return fio, phone
 
 
 async def process_receipt(message: Message, state: FSMContext, bot: Bot, file_id: str, is_document: bool):
-    data = await state.get_data()
-    fio = data.get("fio")
-    phone = data.get("phone")
-    user = message.from_user
+    caption = message.caption
+    fio, phone = parse_caption(caption)
 
+    if not fio or not phone:
+        await message.answer(
+            "Iltimos, rasmning tavsifiga (caption) ikkita qatorda yozing:\n\n"
+            "Ism Familiya\n"
+            "Telefon raqam\n\n"
+            "Va chekni shu tavsif bilan qayta yuboring."
+        )
+        return
+
+    user = message.from_user
     reg_id = save_registration(user.id, user.username or "", fio, phone, file_id)
 
-    caption = (
+    admin_caption = (
         f"🔔 YANGI MEN — YANGI TO'LOV\n\n"
         f"👤 Ism: {fio}\n"
         f"📱 Telefon: {phone}\n"
@@ -207,11 +188,11 @@ async def process_receipt(message: Message, state: FSMContext, bot: Bot, file_id
 
     if is_document:
         await bot.send_document(
-            chat_id=ADMIN_CHAT_ID, document=file_id, caption=caption, reply_markup=admin_keyboard(reg_id)
+            chat_id=ADMIN_CHAT_ID, document=file_id, caption=admin_caption, reply_markup=admin_keyboard(reg_id)
         )
     else:
         await bot.send_photo(
-            chat_id=ADMIN_CHAT_ID, photo=file_id, caption=caption, reply_markup=admin_keyboard(reg_id)
+            chat_id=ADMIN_CHAT_ID, photo=file_id, caption=admin_caption, reply_markup=admin_keyboard(reg_id)
         )
 
     await message.answer(
@@ -221,14 +202,22 @@ async def process_receipt(message: Message, state: FSMContext, bot: Bot, file_id
     await state.clear()
 
 
-@router.message(Reg.waiting_receipt, F.photo)
+@router.message(Reg.waiting_all, F.photo)
 async def get_receipt_photo(message: Message, state: FSMContext, bot: Bot):
     await process_receipt(message, state, bot, message.photo[-1].file_id, is_document=False)
 
 
-@router.message(Reg.waiting_receipt, F.document)
+@router.message(Reg.waiting_all, F.document)
 async def get_receipt_doc(message: Message, state: FSMContext, bot: Bot):
     await process_receipt(message, state, bot, message.document.file_id, is_document=True)
+
+
+@router.message(Reg.waiting_all)
+async def wrong_input(message: Message):
+    await message.answer(
+        "Iltimos, to'lov chekini RASM sifatida yuboring, tavsifiga (caption) ism-familiya "
+        "va telefon raqamingizni yozib."
+    )
 
 
 # ---- АДМИН: только отметка для учёта, никаких авто-сообщений участнице ----
