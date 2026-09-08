@@ -83,7 +83,7 @@ class Reg(StatesGroup):
 def paid_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="To'lovni amalga oshirish", callback_data="paid_confirm")]
+            [InlineKeyboardButton(text="✅ TO'LOV QILDIM ✅", callback_data="paid_confirm")]
         ]
     )
 
@@ -116,8 +116,9 @@ async def cmd_start(message: Message, state: FSMContext):
 @router.callback_query(F.data == "paid_confirm")
 async def ask_receipt(callback: CallbackQuery, state: FSMContext):
     text = (
-        "To'lov qilganingiz uchun rahmat! 💛\n\n"
-        "Chekni tashlashni unutmang — rasm, PDF yoki matn ko'rinishida, qanday bo'lsa ham yuboring."
+        "To'lovingiz uchun rahmat! 🧡\n\n"
+        "📎 Chekni yuborishni unutmang.\n\n"
+        "Chekni rasm, PDF yoki matn ko'rinishida yuborishingiz mumkin."
     )
     await callback.message.answer(text)
     await state.set_state(Reg.waiting_receipt)
