@@ -138,13 +138,16 @@ async def show_payment(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "paid_confirm")
 async def ask_data(callback: CallbackQuery, state: FSMContext):
     text = (
-        "To'lov chekini rasm sifatida yuboring.\n\n"
-        "Rasmning tavsifiga (caption) shu tartibda yozing:\n\n"
-        "Ism Familiya\n"
-        "Telefon raqam\n\n"
-        "Masalan:\n"
+        "To'lov chekini yuborish uchun:\n\n"
+        "1️⃣ 📎 (skrepka) belgisini bosing\n"
+        "2️⃣ Chek rasmini tanlang\n"
+        "3️⃣ Rasm ostidagi \"Izoh yozish\" (yoki \"Caption\") maydoniga bosing\n"
+        "4️⃣ Shu yerga ism-familiya va telefon raqamingizni yozing\n"
+        "5️⃣ Yuboring ➡️\n\n"
+        "Yozish namunasi (2 qatorda):\n"
         "Anora Karimova\n"
-        "+998 90 123 45 67"
+        "+998 90 123 45 67\n\n"
+        "❗️Rasmni matn bilan BIRGA, bitta xabar qilib yuboring — alohida emas."
     )
     await callback.message.answer(text)
     await state.set_state(Reg.waiting_all)
