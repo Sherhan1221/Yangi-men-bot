@@ -44,9 +44,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
             username TEXT,
-            fio TEXT,
-            phone TEXT,
-            receipt_file_id TEXT,
+            full_name TEXT,
             status TEXT DEFAULT 'pending',
             created_at TEXT
         )
@@ -56,12 +54,11 @@ def init_db():
     conn.close()
 
 
-def save_registration(user_id, username, fio, phone, receipt_file_id):
+def save_registration(user_id, username, full_name):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.execute(
-        "INSERT INTO registrations (user_id, username, fio, phone, receipt_file_id, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (user_id, username, fio, phone, receipt_file_id, datetime.now().isoformat()),
+        "INSERT INTO registrations (user_id, username, full_name, created_at) VALUES (?, ?, ?, ?)",
+        (user_id, username, full_name, datetime.now().isoformat()),
     )
     conn.commit()
     reg_id = cur.lastrowid
@@ -80,21 +77,13 @@ router = Router()
 
 
 class Reg(StatesGroup):
-    waiting_all = State()
-
-
-def join_keyboard():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="YANGI MEN'GA QO'SHILISH", callback_data="join")]
-        ]
-    )
+    waiting_receipt = State()
 
 
 def paid_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="✅ TO'LOV QILDIM", callback_data="paid_confirm")]
+            [InlineKeyboardButton(text="To'lovni amalga oshirish", callback_data="paid_confirm")]
         ]
     )
 
@@ -110,125 +99,63 @@ def admin_keyboard(reg_id: int):
     )
 
 
-# ---- LANDING ----
+# ---- /start сразу показывает оплату, без лишнего экрана ----
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer(
-        "YANGI MEN dasturiga xush kelibsiz.",
-        reply_markup=join_keyboard(),
-    )
-
-
-# ---- БЛОК 1: ОПЛАТА ----
-@router.callback_query(F.data == "join")
-async def show_payment(callback: CallbackQuery, state: FSMContext):
     text = (
-        f"💳 YANGI MEN'GA QO'SHILISH\n\n"
+        "🌸 <b>YANGI MEN</b>\n\n"
         f"{COURSE_PRICE}\n\n"
         f"Karta:\n{CARD_NUMBER}\n\n"
-        f"Karta egasi:\n{CARD_HOLDER}\n\n"
-        f"To'lovni amalga oshirgach, chekni yuboring."
+        f"Karta egasi:\n{CARD_HOLDER}"
     )
-    await callback.message.answer(text, reply_markup=paid_keyboard())
-    await callback.answer()
+    await message.answer(text, reply_markup=paid_keyboard(), parse_mode="HTML")
 
 
-# ---- БЛОК 2: ВСЁ ОДНИМ СООБЩЕНИЕМ ----
+# ---- ЧЕК (любой формат) ----
 @router.callback_query(F.data == "paid_confirm")
-async def ask_data(callback: CallbackQuery, state: FSMContext):
+async def ask_receipt(callback: CallbackQuery, state: FSMContext):
     text = (
-        "To'lov chekini yuborish uchun:\n\n"
-        "1️⃣ 📎 (skrepka) belgisini bosing\n"
-        "2️⃣ Chek rasmini tanlang\n"
-        "3️⃣ Rasm ostidagi \"Izoh yozish\" (yoki \"Caption\") maydoniga bosing\n"
-        "4️⃣ Shu yerga ism-familiya va telefon raqamingizni yozing\n"
-        "5️⃣ Yuboring ➡️\n\n"
-        "Yozish namunasi (2 qatorda):\n"
-        "Anora Karimova\n"
-        "+998 90 123 45 67\n\n"
-        "❗️Rasmni matn bilan BIRGA, bitta xabar qilib yuboring — alohida emas."
+        "To'lov qilganingiz uchun rahmat! 💛\n\n"
+        "Chekni tashlashni unutmang — rasm, PDF yoki matn ko'rinishida, qanday bo'lsa ham yuboring."
     )
     await callback.message.answer(text)
-    await state.set_state(Reg.waiting_all)
+    await state.set_state(Reg.waiting_receipt)
     await callback.answer()
 
 
-def parse_caption(caption: str | None):
-    if not caption:
-        return None, None
-    lines = [line.strip() for line in caption.strip().split("\n") if line.strip()]
-    fio = lines[0] if len(lines) >= 1 else None
-    phone = lines[1] if len(lines) >= 2 else None
-    return fio, phone
-
-
-async def process_receipt(message: Message, state: FSMContext, bot: Bot, file_id: str, is_document: bool):
-    caption = message.caption
-    fio, phone = parse_caption(caption)
-
-    if not fio or not phone:
-        await message.answer(
-            "Iltimos, rasmning tavsifiga (caption) ikkita qatorda yozing:\n\n"
-            "Ism Familiya\n"
-            "Telefon raqam\n\n"
-            "Va chekni shu tavsif bilan qayta yuboring."
-        )
-        return
-
+@router.message(Reg.waiting_receipt)
+async def get_receipt(message: Message, state: FSMContext, bot: Bot):
     user = message.from_user
-    reg_id = save_registration(user.id, user.username or "", fio, phone, file_id)
+    reg_id = save_registration(user.id, user.username or "", user.full_name)
 
-    admin_caption = (
+    info = (
         f"🔔 YANGI MEN — YANGI TO'LOV\n\n"
-        f"👤 Ism: {fio}\n"
-        f"📱 Telefon: {phone}\n"
-        f"💰 Summa: {COURSE_PRICE}\n"
+        f"👤 Ism: {user.full_name}\n"
         f"🔗 Username: @{user.username if user.username else '—'}\n"
         f"🆔 ID: {user.id}\n"
+        f"💰 Summa: {COURSE_PRICE}\n"
         f"#{reg_id}"
     )
 
-    if is_document:
-        await bot.send_document(
-            chat_id=ADMIN_CHAT_ID, document=file_id, caption=admin_caption, reply_markup=admin_keyboard(reg_id)
-        )
-    else:
-        await bot.send_photo(
-            chat_id=ADMIN_CHAT_ID, photo=file_id, caption=admin_caption, reply_markup=admin_keyboard(reg_id)
-        )
+    await bot.forward_message(
+        chat_id=ADMIN_CHAT_ID, from_chat_id=message.chat.id, message_id=message.message_id
+    )
+    await bot.send_message(chat_id=ADMIN_CHAT_ID, text=info, reply_markup=admin_keyboard(reg_id))
 
     await message.answer(
-        "Rahmat! Ma'lumotlaringiz qabul qilindi.\n"
-        "Administrator to'lovni tekshirgach, siz bilan bog'lanadi."
+        "Rahmat! Ma'lumot administratorga yuborildi.\n"
+        "Tez orada tasdiqlaymiz va siz bilan bog'lanamiz."
     )
     await state.clear()
 
 
-@router.message(Reg.waiting_all, F.photo)
-async def get_receipt_photo(message: Message, state: FSMContext, bot: Bot):
-    await process_receipt(message, state, bot, message.photo[-1].file_id, is_document=False)
-
-
-@router.message(Reg.waiting_all, F.document)
-async def get_receipt_doc(message: Message, state: FSMContext, bot: Bot):
-    await process_receipt(message, state, bot, message.document.file_id, is_document=True)
-
-
-@router.message(Reg.waiting_all)
-async def wrong_input(message: Message):
-    await message.answer(
-        "Iltimos, to'lov chekini RASM sifatida yuboring, tavsifiga (caption) ism-familiya "
-        "va telefon raqamingizni yozib."
-    )
-
-
-# ---- АДМИН: только отметка для учёта, никаких авто-сообщений участнице ----
+# ---- АДМИН: только отметка для учёта ----
 @router.callback_query(F.data.startswith("approve_"))
 async def approve_reg(callback: CallbackQuery):
     reg_id = int(callback.data.split("_")[1])
     update_status(reg_id, "approved")
-    await callback.message.edit_caption(caption=callback.message.caption + "\n\n✅ TEKSHIRILDI")
+    await callback.message.edit_text(callback.message.text + "\n\n✅ TEKSHIRILDI")
     await callback.answer("Belgilandi")
 
 
@@ -236,7 +163,7 @@ async def approve_reg(callback: CallbackQuery):
 async def reject_reg(callback: CallbackQuery):
     reg_id = int(callback.data.split("_")[1])
     update_status(reg_id, "rejected")
-    await callback.message.edit_caption(caption=callback.message.caption + "\n\n❌ MUAMMO BOR")
+    await callback.message.edit_text(callback.message.text + "\n\n❌ MUAMMO BOR")
     await callback.answer("Belgilandi")
 
 
