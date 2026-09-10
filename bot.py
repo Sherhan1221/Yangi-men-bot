@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart
@@ -25,7 +25,10 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
 CARD_NUMBER = os.getenv("CARD_NUMBER", "0000 0000 0000 0000")
 CARD_HOLDER = os.getenv("CARD_HOLDER", "F.I.SH.")
-COURSE_PRICE = os.getenv("COURSE_PRICE", "350 000 so'm / oy")
+
+# Ручное переопределение цены (необязательно). Если задано на Railway —
+# имеет приоритет над автоматическим расчётом по дате ниже.
+COURSE_PRICE_OVERRIDE = os.getenv("COURSE_PRICE", "").strip()
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
@@ -34,6 +37,32 @@ PORT = int(os.getenv("PORT", "8080"))
 logging.basicConfig(level=logging.INFO)
 
 DB_PATH = "registrations.db"
+
+# ---- Тарифные пороги по датам (время Ташкента, UTC+5) ----
+TASHKENT_TZ = timezone(timedelta(hours=5))
+EARLY_CUTOFF = datetime(2026, 9, 15, 23, 59, 59, tzinfo=TASHKENT_TZ)   # до 15 сентября включительно
+LATE_CUTOFF = datetime(2026, 9, 25, 23, 59, 59, tzinfo=TASHKENT_TZ)    # 16–25 сентября
+
+EARLY_PRICE = "350 000 so'm / oy"
+LATE_PRICE = "400 000 so'm / oy"
+
+
+def get_course_price() -> str:
+    """Возвращает актуальную цену курса на текущий момент.
+
+    Приоритет:
+    1. Если на Railway вручную задана переменная COURSE_PRICE — используется она.
+    2. Иначе цена определяется автоматически по дате (Asia/Tashkent):
+       - до 15.09 включительно -> 350 000 so'm / oy
+       - 16.09–25.09 (и позже) -> 400 000 so'm / oy
+    """
+    if COURSE_PRICE_OVERRIDE:
+        return COURSE_PRICE_OVERRIDE
+
+    now = datetime.now(TASHKENT_TZ)
+    if now <= EARLY_CUTOFF:
+        return EARLY_PRICE
+    return LATE_PRICE
 
 
 def init_db():
@@ -103,9 +132,10 @@ def admin_keyboard(reg_id: int):
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
+    price = get_course_price()
     text = (
         "🌸 <b>YANGI MEN</b>\n\n"
-        f"{COURSE_PRICE}\n\n"
+        f"{price}\n\n"
         f"Karta:\n{CARD_NUMBER}\n\n"
         f"Karta egasi:\n{CARD_HOLDER}"
     )
@@ -129,13 +159,14 @@ async def ask_receipt(callback: CallbackQuery, state: FSMContext):
 async def get_receipt(message: Message, state: FSMContext, bot: Bot):
     user = message.from_user
     reg_id = save_registration(user.id, user.username or "", user.full_name)
+    price = get_course_price()
 
     info = (
         f"🔔 YANGI MEN — YANGI TO'LOV\n\n"
         f"👤 Ism: {user.full_name}\n"
         f"🔗 Username: @{user.username if user.username else '—'}\n"
         f"🆔 ID: {user.id}\n"
-        f"💰 Summa: {COURSE_PRICE}\n"
+        f"💰 Summa: {price}\n"
         f"#{reg_id}"
     )
 
